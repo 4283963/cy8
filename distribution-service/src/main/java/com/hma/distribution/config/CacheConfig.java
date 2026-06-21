@@ -17,7 +17,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 @Configuration
 @EnableCaching
-@EnableConfigurationProperties(CacheProperties.class)
+@EnableConfigurationProperties({CacheProperties.class, MonitorProperties.class})
 public class CacheConfig {
 
     @Value("${hma.cache.rules.max-size:1000}")
@@ -45,6 +45,20 @@ public class CacheConfig {
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.DiscardPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(10);
+        executor.initialize();
+        return new TaskExecutorAdapter(executor);
+    }
+
+    @Bean(name = "accessStatExecutor")
+    public AsyncTaskExecutor accessStatExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(1024);
+        executor.setThreadNamePrefix("access-stat-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.DiscardOldestPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
         executor.initialize();
         return new TaskExecutorAdapter(executor);
     }

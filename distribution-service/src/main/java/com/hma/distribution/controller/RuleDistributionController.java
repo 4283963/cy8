@@ -2,13 +2,18 @@ package com.hma.distribution.controller;
 
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import com.hma.distribution.dto.CacheStatsDTO;
+import com.hma.distribution.dto.DailyAccessStatDTO;
 import com.hma.distribution.dto.RuleDownloadDTO;
+import com.hma.distribution.service.AccessMonitorService;
 import com.hma.distribution.service.RuleDistributionService;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -16,9 +21,12 @@ import java.util.Map;
 public class RuleDistributionController {
 
     private final RuleDistributionService ruleDistributionService;
+    private final AccessMonitorService accessMonitorService;
 
-    public RuleDistributionController(RuleDistributionService ruleDistributionService) {
+    public RuleDistributionController(RuleDistributionService ruleDistributionService,
+                                       AccessMonitorService accessMonitorService) {
         this.ruleDistributionService = ruleDistributionService;
+        this.accessMonitorService = accessMonitorService;
     }
 
     @GetMapping("/rules/{modelCode}")
@@ -92,6 +100,34 @@ public class RuleDistributionController {
         dto.setLoadFailureCount(stats.loadFailureCount());
         dto.setEvictionCount(stats.evictionCount());
         return ResponseEntity.ok(dto);
+    }
+
+    @GetMapping("/monitor/stats/today")
+    public ResponseEntity<List<DailyAccessStatDTO>> getTodayStats() {
+        return ResponseEntity.ok(accessMonitorService.getTodayStats());
+    }
+
+    @GetMapping("/monitor/stats")
+    public ResponseEntity<List<DailyAccessStatDTO>> getStatsByDate(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.ok(accessMonitorService.getStatsByDate(date));
+    }
+
+    @GetMapping("/monitor/stats/{modelCode}")
+    public ResponseEntity<DailyAccessStatDTO> getTodayStatByModel(@PathVariable String modelCode) {
+        DailyAccessStatDTO dto = accessMonitorService.getTodayStatByModel(modelCode);
+        return dto != null ? ResponseEntity.ok(dto) : ResponseEntity.notFound().build();
+    }
+
+    @GetMapping("/monitor/abnormal/today")
+    public ResponseEntity<List<DailyAccessStatDTO>> getTodayAbnormalList() {
+        return ResponseEntity.ok(accessMonitorService.getTodayAbnormalList());
+    }
+
+    @GetMapping("/monitor/abnormal")
+    public ResponseEntity<List<DailyAccessStatDTO>> getAbnormalListByDate(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ResponseEntity.ok(accessMonitorService.getAbnormalListByDate(date));
     }
 
     @GetMapping("/health")

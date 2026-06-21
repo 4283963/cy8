@@ -47,3 +47,22 @@ CREATE TABLE IF NOT EXISTS hma_rule (
     CONSTRAINT fk_hma_rule_phone_model FOREIGN KEY (phone_model_id) REFERENCES phone_model(id) ON DELETE CASCADE,
     CONSTRAINT fk_hma_rule_app_info FOREIGN KEY (app_info_id) REFERENCES app_info(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS daily_access_stat (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stat_date DATE NOT NULL,
+    model_code VARCHAR(50) NOT NULL,
+    model_name VARCHAR(100),
+    total_count BIGINT NOT NULL DEFAULT 0,
+    success_count BIGINT NOT NULL DEFAULT 0,
+    failure_count BIGINT NOT NULL DEFAULT 0,
+    last_error VARCHAR(1000),
+    last_access_time DATETIME,
+    alerted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_date_model (stat_date, model_code),
+    INDEX idx_stat_date (stat_date),
+    INDEX idx_failure_count (failure_count),
+    INDEX idx_model_code (model_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -45,6 +45,8 @@ hma:
       max-size: 1000
       expire-after-write: 30m
       refresh-after-write: 5m
+  monitor:
+    failure-alert-threshold: 5
 
 logging:
   level:

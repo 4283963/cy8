@@ -43,17 +43,20 @@ public class RuleDistributionService {
     private final Cache<String, CachedRuleEntry> ruleDownloadCache;
     private final CacheProperties cacheProperties;
     private final AsyncTaskExecutor refreshExecutor;
+    private final AccessMonitorService accessMonitorService;
 
     public RuleDistributionService(HmaRuleRepository hmaRuleRepository,
                                    PhoneModelRepository phoneModelRepository,
                                    @Qualifier("ruleDownloadCache") Cache<String, CachedRuleEntry> ruleDownloadCache,
                                    CacheProperties cacheProperties,
-                                   @Qualifier("cacheRefreshExecutor") AsyncTaskExecutor refreshExecutor) {
+                                   @Qualifier("cacheRefreshExecutor") AsyncTaskExecutor refreshExecutor,
+                                   AccessMonitorService accessMonitorService) {
         this.hmaRuleRepository = hmaRuleRepository;
         this.phoneModelRepository = phoneModelRepository;
         this.ruleDownloadCache = ruleDownloadCache;
         this.cacheProperties = cacheProperties;
         this.refreshExecutor = refreshExecutor;
+        this.accessMonitorService = accessMonitorService;
         this.objectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -68,10 +71,12 @@ public class RuleDistributionService {
         if (entry != null) {
             if (isFresh(entry, refreshAfter)) {
                 log.debug("Cache hit (fresh) for model {}", modelCode);
+                accessMonitorService.recordSuccessAsync(modelCode);
                 return entry.getData();
             }
             log.debug("Cache hit (stale) for model {}, returning cached and triggering async refresh", modelCode);
             triggerAsyncRefresh(key, modelCode);
+            accessMonitorService.recordSuccessAsync(modelCode);
             return entry.getData();
         }
 
@@ -79,9 +84,11 @@ public class RuleDistributionService {
             RuleDownloadDTO fresh = loadFromDatabase(modelCode);
             ruleDownloadCache.put(key, new CachedRuleEntry(fresh, Instant.now(), true));
             log.info("Loaded {} rules for model {} from database and cached", fresh.getTotalRules(), modelCode);
+            accessMonitorService.recordSuccessAsync(modelCode);
             return fresh;
         } catch (RuntimeException ex) {
             log.error("Database unavailable and no cache fallback for model {}", modelCode, ex);
+            accessMonitorService.recordFailureAsync(modelCode, ex.getMessage());
             throw ex;
         }
     }
