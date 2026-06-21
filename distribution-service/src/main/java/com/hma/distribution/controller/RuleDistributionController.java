@@ -1,11 +1,15 @@
 package com.hma.distribution.controller;
 
+import com.github.benmanes.caffeine.cache.stats.CacheStats;
+import com.hma.distribution.dto.CacheStatsDTO;
 import com.hma.distribution.dto.RuleDownloadDTO;
 import com.hma.distribution.service.RuleDistributionService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/distribution")
@@ -55,6 +59,39 @@ public class RuleDistributionController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=\"hma_rules_" + modelCode + "." + extension + "\"")
                 .body(data);
+    }
+
+    @DeleteMapping("/cache/{modelCode}")
+    public ResponseEntity<Map<String, Object>> evictCache(@PathVariable String modelCode) {
+        ruleDistributionService.evictCache(modelCode);
+        return ResponseEntity.ok(Map.of(
+                "evicted", modelCode,
+                "status", "ok"
+        ));
+    }
+
+    @DeleteMapping("/cache")
+    public ResponseEntity<Map<String, Object>> evictAllCache() {
+        ruleDistributionService.evictAllCache();
+        return ResponseEntity.ok(Map.of(
+                "evicted", "all",
+                "status", "ok"
+        ));
+    }
+
+    @GetMapping("/cache/stats")
+    public ResponseEntity<CacheStatsDTO> cacheStats() {
+        CacheStats stats = ruleDistributionService.cacheStats();
+        CacheStatsDTO dto = new CacheStatsDTO();
+        dto.setEstimatedSize(ruleDistributionService.cacheSize());
+        dto.setHitCount(stats.hitCount());
+        dto.setMissCount(stats.missCount());
+        dto.setHitRate(stats.hitRate());
+        dto.setRequestCount(stats.requestCount());
+        dto.setLoadSuccessCount(stats.loadSuccessCount());
+        dto.setLoadFailureCount(stats.loadFailureCount());
+        dto.setEvictionCount(stats.evictionCount());
+        return ResponseEntity.ok(dto);
     }
 
     @GetMapping("/health")

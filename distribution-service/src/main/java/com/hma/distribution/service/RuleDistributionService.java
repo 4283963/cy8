@@ -4,37 +4,56 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import com.hma.admin.entity.HmaRule;
 import com.hma.admin.entity.PhoneModel;
 import com.hma.admin.repository.HmaRuleRepository;
 import com.hma.admin.repository.PhoneModelRepository;
+import com.hma.distribution.config.CacheProperties;
+import com.hma.distribution.dto.CachedRuleEntry;
 import com.hma.distribution.dto.HmaConfigDTO;
 import com.hma.distribution.dto.RuleDownloadDTO;
 import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
 public class RuleDistributionService {
 
     private static final Logger log = LoggerFactory.getLogger(RuleDistributionService.class);
+    private static final String CACHE_KEY_RULES = "rules:";
 
     private final HmaRuleRepository hmaRuleRepository;
     private final PhoneModelRepository phoneModelRepository;
     private final ObjectMapper objectMapper;
+    private final Cache<String, CachedRuleEntry> ruleDownloadCache;
+    private final CacheProperties cacheProperties;
+    private final AsyncTaskExecutor refreshExecutor;
 
     public RuleDistributionService(HmaRuleRepository hmaRuleRepository,
-                                   PhoneModelRepository phoneModelRepository) {
+                                   PhoneModelRepository phoneModelRepository,
+                                   @Qualifier("ruleDownloadCache") Cache<String, CachedRuleEntry> ruleDownloadCache,
+                                   CacheProperties cacheProperties,
+                                   @Qualifier("cacheRefreshExecutor") AsyncTaskExecutor refreshExecutor) {
         this.hmaRuleRepository = hmaRuleRepository;
         this.phoneModelRepository = phoneModelRepository;
+        this.ruleDownloadCache = ruleDownloadCache;
+        this.cacheProperties = cacheProperties;
+        this.refreshExecutor = refreshExecutor;
         this.objectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -42,6 +61,57 @@ public class RuleDistributionService {
     }
 
     public RuleDownloadDTO getRulesForModel(String modelCode) {
+        String key = CACHE_KEY_RULES + modelCode;
+        CachedRuleEntry entry = ruleDownloadCache.getIfPresent(key);
+        Duration refreshAfter = cacheProperties.getRules().getRefreshAfterWrite();
+
+        if (entry != null) {
+            if (isFresh(entry, refreshAfter)) {
+                log.debug("Cache hit (fresh) for model {}", modelCode);
+                return entry.getData();
+            }
+            log.debug("Cache hit (stale) for model {}, returning cached and triggering async refresh", modelCode);
+            triggerAsyncRefresh(key, modelCode);
+            return entry.getData();
+        }
+
+        try {
+            RuleDownloadDTO fresh = loadFromDatabase(modelCode);
+            ruleDownloadCache.put(key, new CachedRuleEntry(fresh, Instant.now(), true));
+            log.info("Loaded {} rules for model {} from database and cached", fresh.getTotalRules(), modelCode);
+            return fresh;
+        } catch (RuntimeException ex) {
+            log.error("Database unavailable and no cache fallback for model {}", modelCode, ex);
+            throw ex;
+        }
+    }
+
+    private boolean isFresh(CachedRuleEntry entry, Duration refreshAfter) {
+        if (entry.getCreatedAt() == null) {
+            return false;
+        }
+        return entry.getCreatedAt().plus(refreshAfter).isAfter(Instant.now());
+    }
+
+    private void triggerAsyncRefresh(String key, String modelCode) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                RuleDownloadDTO fresh = loadFromDatabase(modelCode);
+                ruleDownloadCache.put(key, new CachedRuleEntry(fresh, Instant.now(), true));
+                log.info("Async refresh succeeded for model {}", modelCode);
+            } catch (RuntimeException ex) {
+                CachedRuleEntry existing = ruleDownloadCache.getIfPresent(key);
+                if (existing != null) {
+                    ruleDownloadCache.put(key, new CachedRuleEntry(existing.getData(), existing.getCreatedAt(), false));
+                    log.warn("Async refresh failed for model {}, kept stale cache: {}", modelCode, ex.getMessage());
+                } else {
+                    log.warn("Async refresh failed for model {} and no cache to keep: {}", modelCode, ex.getMessage());
+                }
+            }
+        }, refreshExecutor);
+    }
+
+    private RuleDownloadDTO loadFromDatabase(String modelCode) {
         PhoneModel phoneModel = phoneModelRepository.findByModelCode(modelCode)
                 .orElseThrow(() -> new EntityNotFoundException("Phone model not found: " + modelCode));
 
@@ -65,7 +135,6 @@ public class RuleDistributionService {
                 .collect(Collectors.toList());
         dto.setRules(ruleItems);
 
-        log.info("Downloaded {} rules for model {}", rules.size(), modelCode);
         return dto;
     }
 
@@ -122,6 +191,24 @@ public class RuleDistributionService {
             case "list" -> getSimplePackageList(modelCode).getBytes();
             default -> throw new IllegalArgumentException("Unsupported format: " + format);
         };
+    }
+
+    public void evictCache(String modelCode) {
+        ruleDownloadCache.invalidate(CACHE_KEY_RULES + modelCode);
+        log.info("Evicted cache for model {}", modelCode);
+    }
+
+    public void evictAllCache() {
+        ruleDownloadCache.invalidateAll();
+        log.info("Evicted all rule caches");
+    }
+
+    public CacheStats cacheStats() {
+        return ruleDownloadCache.stats();
+    }
+
+    public long cacheSize() {
+        return ruleDownloadCache.estimatedSize();
     }
 
     private RuleDownloadDTO.RuleItem convertToRuleItem(HmaRule rule) {

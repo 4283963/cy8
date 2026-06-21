@@ -1,15 +1,27 @@
 server:
   port: 8081
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    accept-count: 100
+    connection-timeout: 5s
 
 spring:
   application:
     name: distribution-service
 
   datasource:
-    url: jdbc:mysql://localhost:3306/hma_rule_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/hma_rule_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=5000
     username: root
     password: your_password
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+      max-lifetime: 600000
+      validation-timeout: 2000
 
   jpa:
     hibernate:
@@ -18,6 +30,8 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
+        jdbc:
+          time_zone: Asia/Shanghai
 
   servlet:
     encoding:
@@ -25,7 +39,14 @@ spring:
       enabled: true
       force: true
 
+hma:
+  cache:
+    rules:
+      max-size: 1000
+      expire-after-write: 30m
+      refresh-after-write: 5m
+
 logging:
   level:
     com.hma.distribution: INFO
-    com.hma.admin: INFO
+    com.hma.admin: WARN
